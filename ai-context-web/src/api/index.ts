@@ -31,6 +31,7 @@ export async function getIndexStatus(appId: string): Promise<{
   last_commit: string | null
   last_indexed_at: string | null
   stats: Record<string, number> | null
+  current_job_id: number | null
 }> {
   const res = await client.get(`/apps/${appId}/index/status`)
   return res.data
@@ -48,5 +49,22 @@ export function getProgressUrl(jobId: number): string {
 
 export async function cancelIndex(appId: string): Promise<{ message: string }> {
   const res = await client.post(`/apps/${appId}/index/cancel`)
+  return res.data
+}
+
+export interface SystemIndexStatus {
+  running_count: number
+  pending_count: number
+  max_concurrent: number
+  status_counts: Record<string, number>
+  recent_completed: {
+    app_id: string
+    status: string
+    completed_at: string | null
+  } | null
+}
+
+export async function getSystemIndexStatus(systemId: string): Promise<SystemIndexStatus> {
+  const res = await client.get<SystemIndexStatus>(`/systems/${systemId}/index-status`)
   return res.data
 }

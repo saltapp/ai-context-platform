@@ -88,3 +88,25 @@ async def revoke_token(
     )
 
     return {"message": "revoked"}
+
+
+@router.delete("/tokens/{token_id}/hard")
+async def hard_delete_token(
+    token_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    try:
+        await token_service.delete_token(db, token_id, user.id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+    await log_action(
+        db,
+        user_id=user.id,
+        action="token_delete",
+        target_type="api_token",
+        target_id=str(token_id),
+    )
+
+    return {"message": "deleted"}

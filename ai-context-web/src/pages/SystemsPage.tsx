@@ -76,14 +76,6 @@ export default function SystemsPage() {
     }
   }
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    })
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -131,7 +123,7 @@ export default function SystemsPage() {
                 </p>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-gray-400">
-                    创建于: {formatDate(sys.created_at)}
+                    {sys.apps?.length ?? 0} 个APP
                   </span>
                   <span className="text-indigo-600 hover:text-indigo-700 text-sm font-medium">
                     查看详情
@@ -198,13 +190,14 @@ export default function SystemsPage() {
 
               <div>
                 <label htmlFor="sys-gitlab-user" className="block text-sm font-medium text-gray-700 mb-1">
-                  GitLab 用户名
+                  GitLab 用户名 <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="sys-gitlab-user"
                   type="text"
                   value={formGitlabUser}
                   onChange={(e) => setFormGitlabUser(e.target.value)}
+                  required
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   placeholder="GitLab 用户名"
                 />
@@ -212,13 +205,14 @@ export default function SystemsPage() {
 
               <div>
                 <label htmlFor="sys-gitlab-token" className="block text-sm font-medium text-gray-700 mb-1">
-                  GitLab 密码/Token
+                  GitLab 密码/Token <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="sys-gitlab-token"
                   type="password"
                   value={formGitlabToken}
                   onChange={(e) => setFormGitlabToken(e.target.value)}
+                  required
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   placeholder="密码或 Access Token"
                 />

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,3 +80,23 @@ async def get_wiki_content(
     if content is None:
         raise HTTPException(404, f"Wiki module '{module}' not found")
     return {"name": module, "content": content}
+
+
+@router.get("/apps/{app_id}/wiki-page")
+async def get_wiki_page(
+    app_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    app = await AppService.get_app(db, app_id)
+    if not app:
+        raise HTTPException(404, "App not found")
+    _check_index(app)
+
+    if not app.repo_path:
+        raise HTTPException(404, "App repo path not set")
+
+    html = bridge.read_wiki_html(app.repo_path)
+    if html is None:
+        raise HTTPException(404, "Wiki page not found")
+    return HTMLResponse(content=html)

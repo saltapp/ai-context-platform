@@ -5,6 +5,7 @@ export interface User {
   username: string
   display_name: string
   role: string
+  created_at: string | null
 }
 
 export interface LoginResponse {

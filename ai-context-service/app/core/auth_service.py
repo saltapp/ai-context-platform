@@ -69,10 +69,18 @@ async def handle_login_success(db: AsyncSession, user: User) -> None:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    token = credentials.credentials
+    token = None
+    if credentials:
+        token = credentials.credentials
+    elif "token" in request.query_params:
+        token = request.query_params["token"]
+
+    if not token:
+        raise HTTPException(401, "Not authenticated")
 
     # Try API Token first (ac_ prefix)
     if token.startswith("ac_"):

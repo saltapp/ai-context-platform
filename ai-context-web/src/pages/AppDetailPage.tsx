@@ -1,16 +1,13 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { getApp, updateApp, deleteApp } from '../api/apps'
 import { triggerIndex } from '../api/index'
-import { getWikiIndex, getWikiContent } from '../api/graph'
 import { listAppDocs, deleteDocument, downloadFile, uploadDocument } from '../api/documents'
 import type { App } from '../api/systems'
 import type { Document } from '../api/documents'
 import StatusBadge from '../components/StatusBadge'
 import ConfirmDialog from '../components/ConfirmDialog'
-import mermaid from 'mermaid'
-import ReactMarkdown from 'react-markdown'
 
 type TabKey = 'wiki' | 'docs'
 
@@ -40,142 +37,6 @@ function formatDateTime(iso: string | null): string {
     hour: '2-digit',
     minute: '2-digit',
   })
-}
-
-// ---------- WikiViewer component ----------
-function WikiViewer({ appId }: { appId: string }) {
-  const [modules, setModules] = useState<{ name: string; file: string }[]>([])
-  const [selectedModule, setSelectedModule] = useState<string | null>(null)
-  const [content, setContent] = useState<string>('')
-  const [loading, setLoading] = useState(false)
-  const contentRef = useRef<HTMLDivElement>(null)
-  const mermaidCounter = useRef(0)
-
-  useEffect(() => {
-    let cancelled = false
-    getWikiIndex(appId)
-      .then((data) => {
-        if (cancelled) return
-        setModules(data.modules ?? [])
-        if (data.modules?.length > 0 && !selectedModule) {
-          setSelectedModule(data.modules[0].file)
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appId])
-
-  useEffect(() => {
-    if (!selectedModule) return
-    let cancelled = false
-    setLoading(true)
-    getWikiContent(appId, selectedModule)
-      .then((data) => {
-        if (cancelled) return
-        setContent(data.content ?? '')
-      })
-      .catch(() => setContent(''))
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [appId, selectedModule])
-
-  // Render mermaid diagrams after content changes
-  useEffect(() => {
-    if (!content || !contentRef.current) return
-
-    const timer = setTimeout(() => {
-      const mermaidBlocks = contentRef.current?.querySelectorAll('.mermaid-diagram')
-      if (!mermaidBlocks || mermaidBlocks.length === 0) return
-
-      mermaid.initialize({ startOnLoad: false, theme: 'default' })
-
-      mermaidBlocks.forEach(async (el) => {
-        const definition = el.getAttribute('data-mermaid')
-        if (!definition) return
-        const id = `mermaid-svg-${mermaidCounter.current++}`
-        try {
-          const { svg } = await mermaid.render(id, definition)
-          el.innerHTML = svg
-        } catch {
-          el.innerHTML = '<p class="text-red-500 text-sm">Mermaid 渲染失败</p>'
-        }
-      })
-    }, 100)
-
-    return () => clearTimeout(timer)
-  }, [content])
-
-  // Preprocess markdown: replace ```mermaid blocks with placeholder divs
-  const preprocessContent = useCallback((md: string) => {
-    return md.replace(
-      /```mermaid\s*\n([\s\S]*?)```/g,
-      (_match, code: string) =>
-        `<div class="mermaid-diagram my-4 p-4 bg-gray-50 rounded-lg overflow-x-auto" data-mermaid="${code.trim().replace(/"/g, '&quot;')}"></div>`,
-    )
-  }, [])
-
-  if (modules.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-400">
-        暂无 Wiki 内容
-      </div>
-    )
-  }
-
-  const processedContent = preprocessContent(content)
-
-  return (
-    <div className="flex gap-6">
-      {/* Left sidebar - module list */}
-      <div className="w-64 shrink-0">
-        <div className="bg-white rounded-lg shadow-sm p-3">
-          <h3 className="text-sm font-medium text-gray-500 mb-2 px-2">Wiki 目录</h3>
-          <ul className="space-y-0.5">
-            {modules.map((mod) => (
-              <li key={mod.file}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedModule(mod.file)}
-                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors cursor-pointer ${
-                    selectedModule === mod.file
-                      ? 'bg-indigo-50 text-indigo-600 font-medium'
-                      : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  {mod.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      {/* Right content area */}
-      <div className="flex-1 min-w-0">
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          {loading ? (
-            <div className="text-center py-8 text-gray-400">加载中...</div>
-          ) : !content ? (
-            <div className="text-center py-8 text-gray-400">请从左侧选择模块查看</div>
-          ) : (
-            <div
-              ref={contentRef}
-              className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-a:text-indigo-600"
-            >
-              <ReactMarkdown>{processedContent}</ReactMarkdown>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ---------- Main Page ----------
@@ -248,7 +109,7 @@ export default function AppDetailPage() {
     if (!id || submitting) return
     setSubmitting(true)
     try {
-      const result = await triggerIndex(id)
+      const result = await triggerIndex(id, true, true)
       navigate(`/apps/${id}/index/${result.job_id}`)
     } finally {
       setSubmitting(false)
@@ -447,7 +308,12 @@ export default function AppDetailPage() {
               <p className="text-amber-700 text-sm">请先完成索引后再查看 Wiki</p>
             </div>
           ) : (
-            <WikiViewer appId={app.id} />
+            <iframe
+              src={`/api/v1/apps/${app.id}/wiki-page?token=${encodeURIComponent(localStorage.getItem('access_token') || '')}`}
+              className="w-full border border-gray-200 rounded-lg bg-white"
+              style={{ height: 'calc(100vh - 200px)', minHeight: 600 }}
+              title="Wiki"
+            />
           )}
         </div>
       )}

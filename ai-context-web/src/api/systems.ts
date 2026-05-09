@@ -27,6 +27,7 @@ export interface App {
   index_status: string
   last_indexed_at: string | null
   last_commit: string | null
+  current_job_id?: number | null
 }
 
 export interface CreateSystemData {

@@ -24,43 +24,26 @@ async def get_routes(
         raise HTTPException(503, "Indexing in progress, please try again later")
 
     try:
-        data = await bridge.search("", repo=app.name, limit=0)
-    except Exception:
-        pass
+        processes = await bridge.get_processes(app.name)
 
-    try:
-        repos = await bridge.get_repos()
-        repo_name = None
-        for r in repos:
-            if r.get("path", "").endswith(app.name) or r.get("name") == app.name:
-                repo_name = r.get("name")
-                break
-
-        if not repo_name:
-            return {"routes": []}
-
-        resp = await bridge._client.get("/api/processes", params={"repo": repo_name})
-        resp.raise_for_status()
-        processes = resp.json()
-
+        # Deduplicate by handler entry point
         routes = []
         seen = set()
         for proc in processes:
-            proc_name = proc.get("name", "")
-            steps = proc.get("steps", [])
-            for step in steps:
-                for node in step.get("nodes", []):
-                    node_type = node.get("type", "")
-                    if node_type == "Route" and node_type not in seen:
-                        seen.add(node_type)
-                        routes.append({
-                            "method": node.get("method", ""),
-                            "path": node.get("path", ""),
-                            "handler": node.get("name", ""),
-                            "handler_file": node.get("filePath", ""),
-                            "middleware": [],
-                            "consumers": [],
-                        })
+            key = f"{proc['handler_file']}:{proc['handler']}"
+            if not proc["handler"] or key in seen:
+                continue
+            seen.add(key)
+            routes.append({
+                "method": "",
+                "path": "",
+                "handler": proc["handler"],
+                "handler_file": proc["handler_file"],
+                "process_summary": proc["summary"],
+                "process_type": proc["process_type"],
+                "middleware": [],
+                "consumers": [],
+            })
 
         return {"routes": routes}
     except Exception as e:

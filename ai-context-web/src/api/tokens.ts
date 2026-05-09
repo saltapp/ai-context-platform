@@ -39,3 +39,7 @@ export async function rotateToken(id: string): Promise<RotateTokenResponse> {
 export async function deleteToken(id: string): Promise<void> {
   await client.delete(`/tokens/${id}`)
 }
+
+export async function hardDeleteToken(id: string): Promise<void> {
+  await client.delete(`/tokens/${id}/hard`)
+}

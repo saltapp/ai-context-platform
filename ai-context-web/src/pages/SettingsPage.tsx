@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { listTokens, createToken, rotateToken, deleteToken } from '../api/tokens'
+import { listTokens, createToken, rotateToken, deleteToken, hardDeleteToken } from '../api/tokens'
 import type { ApiToken } from '../api/tokens'
+import { useAuth } from '../hooks/useAuth'
+import { downloadSkillZip } from '../api/skill'
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '-'
@@ -15,6 +17,7 @@ function formatDateTime(iso: string | null): string {
 }
 
 export default function SettingsPage() {
+  const { user } = useAuth()
   const [tokens, setTokens] = useState<ApiToken[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -24,14 +27,21 @@ export default function SettingsPage() {
   const [createdToken, setCreatedToken] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
-  // Rotate dialog
-  const [rotatingToken, setRotatingToken] = useState<ApiToken | null>(null)
-  const [rotatedToken, setRotatedToken] = useState<string | null>(null)
-  const [rotating, setRotating] = useState(false)
+  // Regenerate dialog
+  const [regeneratingToken, setRegeneratingToken] = useState<ApiToken | null>(null)
+  const [regeneratedToken, setRegeneratedToken] = useState<string | null>(null)
+  const [regenerating, setRegenerating] = useState(false)
 
   // Revoke dialog
   const [revokingToken, setRevokingToken] = useState<ApiToken | null>(null)
   const [revoking, setRevoking] = useState(false)
+
+  // Delete dialog
+  const [deletingToken, setDeletingToken] = useState<ApiToken | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  // Skill download
+  const [skillDownloading, setSkillDownloading] = useState(false)
 
   const loadTokens = async () => {
     setLoading(true)
@@ -70,24 +80,24 @@ export default function SettingsPage() {
     setCreatedToken(null)
   }
 
-  // ---------- Rotate Token ----------
-  const handleRotate = async () => {
-    if (!rotatingToken || rotating) return
-    setRotating(true)
+  // ---------- Regenerate Token ----------
+  const handleRegenerate = async () => {
+    if (!regeneratingToken || regenerating) return
+    setRegenerating(true)
     try {
-      const res = await rotateToken(rotatingToken.id)
-      setRotatedToken(res.token)
+      const res = await rotateToken(regeneratingToken.id)
+      setRegeneratedToken(res.token)
       await loadTokens()
     } catch {
       /* ignore */
     } finally {
-      setRotating(false)
+      setRegenerating(false)
     }
   }
 
-  const closeRotateDialog = () => {
-    setRotatingToken(null)
-    setRotatedToken(null)
+  const closeRegenerateDialog = () => {
+    setRegeneratingToken(null)
+    setRegeneratedToken(null)
   }
 
   // ---------- Revoke Token ----------
@@ -105,9 +115,37 @@ export default function SettingsPage() {
     }
   }
 
+  // ---------- Hard Delete Token ----------
+  const handleHardDelete = async () => {
+    if (!deletingToken || deleting) return
+    setDeleting(true)
+    try {
+      await hardDeleteToken(deletingToken.id)
+      setDeletingToken(null)
+      await loadTokens()
+    } catch {
+      /* ignore */
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   // ---------- Copy helper ----------
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
+  }
+
+  // ---------- Skill download ----------
+  const handleDownloadSkill = async () => {
+    if (skillDownloading) return
+    setSkillDownloading(true)
+    try {
+      await downloadSkillZip()
+    } catch {
+      /* ignore */
+    } finally {
+      setSkillDownloading(false)
+    }
   }
 
   return (
@@ -115,6 +153,35 @@ export default function SettingsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">个人设置</h1>
       </div>
+
+      {/* ===== Account Info ===== */}
+      {user && (
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">账户信息</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <span className="text-xs text-gray-500">用户名</span>
+              <p className="text-sm text-gray-900 mt-1">{user.username}</p>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500">角色</span>
+              <p className="mt-1">
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                  user.role === 'admin'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'bg-blue-100 text-blue-700'
+                }`}>
+                  {user.role === 'admin' ? '管理员' : '普通用户'}
+                </span>
+              </p>
+            </div>
+            <div>
+              <span className="text-xs text-gray-500">注册时间</span>
+              <p className="text-sm text-gray-900 mt-1">{formatDateTime(user.created_at)}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== Token Management ===== */}
       <div className="bg-white rounded-lg shadow-sm">
@@ -175,17 +242,17 @@ export default function SettingsPage() {
                       {formatDateTime(tok.last_used_at)}
                     </td>
                     <td className="px-4 py-3 text-sm text-right whitespace-nowrap">
-                      {tok.status === 'active' && (
+                      {tok.status === 'active' ? (
                         <>
                           <button
                             type="button"
                             onClick={() => {
-                              setRotatedToken(null)
-                              setRotatingToken(tok)
+                              setRegeneratedToken(null)
+                              setRegeneratingToken(tok)
                             }}
                             className="text-indigo-600 hover:text-indigo-800 mr-3 cursor-pointer"
                           >
-                            轮换
+                            重新生成
                           </button>
                           <button
                             type="button"
@@ -195,6 +262,14 @@ export default function SettingsPage() {
                             撤销
                           </button>
                         </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setDeletingToken(tok)}
+                          className="text-red-500 hover:text-red-700 cursor-pointer"
+                        >
+                          删除
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -275,32 +350,32 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* ===== Rotate Token Modal ===== */}
-      {rotatingToken && (
+      {/* ===== Regenerate Token Modal ===== */}
+      {regeneratingToken && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl max-w-lg w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">轮换 Token</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">重新生成 Token</h3>
 
-            {!rotatedToken ? (
+            {!regeneratedToken ? (
               <>
                 <p className="text-sm text-gray-600 mb-6">
-                  确认轮换 Token「{rotatingToken.name}」？轮换后旧 Token 将立即失效，新 Token 将生成。
+                  确认重新生成 Token「{regeneratingToken.name}」？原 Token 将立即失效。
                 </p>
                 <div className="flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={closeRotateDialog}
+                    onClick={closeRegenerateDialog}
                     className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="button"
-                    onClick={handleRotate}
-                    disabled={rotating}
+                    onClick={handleRegenerate}
+                    disabled={regenerating}
                     className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
                   >
-                    {rotating ? '轮换中...' : '确认轮换'}
+                    {regenerating ? '生成中...' : '确认重新生成'}
                   </button>
                 </div>
               </>
@@ -308,15 +383,15 @@ export default function SettingsPage() {
               <>
                 <div className="mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
                   <p className="text-sm text-emerald-700 font-medium mb-2">
-                    新 Token 已生成！请立即复制，此 Token 仅显示一次。
+                    Token 已重新生成！请立即复制，此 Token 仅显示一次。
                   </p>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 bg-white border border-gray-200 rounded px-3 py-2 text-sm font-mono break-all">
-                      {rotatedToken}
+                      {regeneratedToken}
                     </code>
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(rotatedToken)}
+                      onClick={() => copyToClipboard(regeneratedToken)}
                       className="shrink-0 px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
                     >
                       复制
@@ -326,7 +401,7 @@ export default function SettingsPage() {
                 <div className="flex justify-end">
                   <button
                     type="button"
-                    onClick={closeRotateDialog}
+                    onClick={closeRegenerateDialog}
                     className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
                   >
                     完成
@@ -366,6 +441,65 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* ===== Hard Delete Token Confirm ===== */}
+      {deletingToken && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl max-w-lg w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">删除 Token</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              确认删除 Token「{deletingToken.name}」？此操作不可恢复。
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeletingToken(null)}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleHardDelete}
+                disabled={deleting}
+                className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 cursor-pointer"
+              >
+                {deleting ? '删除中...' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Skill 配置 ===== */}
+      <div className="bg-white rounded-lg shadow-sm">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Skill 配置</h2>
+          <button
+            type="button"
+            onClick={handleDownloadSkill}
+            disabled={skillDownloading}
+            className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+          >
+            {skillDownloading ? '下载中...' : '下载 Skill 配置'}
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-gray-600">
+            Skill 配置文件用于让 Claude Code 查询 AI Context 平台 API。下载后请打开 SKILL.md 填写你的 API Token。
+          </p>
+
+          <div>
+            <p className="text-xs text-gray-500 mb-2">安装步骤：</p>
+            <div className="bg-gray-900 rounded-lg p-4 text-sm font-mono text-gray-100 space-y-1">
+              <p>{'cd ~/.claude/skills'}</p>
+              <p>{'unzip ~/Downloads/ai-context-skill.zip'}</p>
+              <p>{'# 编辑 ai-context/SKILL.md，将 ac_xxx... 替换为你的 API Token'}</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

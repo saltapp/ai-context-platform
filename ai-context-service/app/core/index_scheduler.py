@@ -21,6 +21,26 @@ _active_repos: dict[str, int] = {}
 _cli_lock = asyncio.Lock()
 
 
+async def recover_stale_jobs():
+    """Startup: mark orphaned pending/running jobs as failed (process restarted)."""
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        stmt = select(IndexJob).where(IndexJob.status.in_(["pending", "running"]))
+        result = await db.execute(stmt)
+        stale_jobs = result.scalars().all()
+        if not stale_jobs:
+            return
+        for job in stale_jobs:
+            job.status = "failed"
+            job.error_message = "Job interrupted by server restart"
+            job.completed_at = datetime.utcnow()
+            app = await db.get(App, job.app_id)
+            if app and app.index_status in ("pending", "running"):
+                app.index_status = "failed"
+        await db.commit()
+        logger.info(f"Recovered {len(stale_jobs)} stale index jobs")
+
+
 class IndexScheduler:
     @staticmethod
     async def trigger_index(
@@ -64,7 +84,7 @@ class IndexScheduler:
         result_sys = await db.execute(stmt_sys)
         system = result_sys.scalar_one_or_none()
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             IndexScheduler._execute_index(
                 job_id=job.id,
                 app_id=app_id,
@@ -77,6 +97,7 @@ class IndexScheduler:
                 expected_version=app.version,
             )
         )
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
         return job
 
     @staticmethod
@@ -92,6 +113,7 @@ class IndexScheduler:
         expected_version: int,
     ):
         async with _semaphore:
+            logger.info(f"Job {job_id}: starting execution, repo={repo_path}, git_url={git_url}, branch={tracked_branch}")
             if repo_path in _active_repos:
                 logger.warning(f"Repo {repo_path} already being indexed, aborting job {job_id}")
                 await _update_job_failed(job_id, "Repo is already being indexed by another job")
@@ -140,7 +162,7 @@ class IndexScheduler:
                     wiki_dir = os.path.join(repo_path, "wiki")
 
                     # Temporarily point to wiki_new for generation
-                    await bridge.generate_wiki(repo_path)
+                    await bridge.generate_wiki(repo_path, force=force)
 
                     # Atomic rename: wiki_new -> wiki
                     if os.path.isdir(wiki_new_dir):
@@ -248,11 +270,27 @@ class IndexScheduler:
         app = result.scalar_one_or_none()
         if not app:
             return None
+
+        # Get current job id if pending/running
+        current_job_id = None
+        if app.index_status in ("pending", "running"):
+            job_stmt = (
+                select(IndexJob.id)
+                .where(IndexJob.app_id == app_id, IndexJob.status.in_(["pending", "running"]))
+                .order_by(IndexJob.id.desc())
+                .limit(1)
+            )
+            job_result = await db.execute(job_stmt)
+            row = job_result.scalar_one_or_none()
+            if row:
+                current_job_id = row
+
         return {
             "status": app.index_status,
             "version": app.version,
             "last_commit": app.last_commit,
             "last_indexed_at": app.last_indexed_at.isoformat() if app.last_indexed_at else None,
+            "current_job_id": current_job_id,
         }
 
     @staticmethod

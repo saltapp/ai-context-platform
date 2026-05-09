@@ -71,33 +71,31 @@ async def revoke_token(db: AsyncSession, token_id: int, user_id: int) -> None:
 
 
 async def rotate_token(db: AsyncSession, token_id: int, user_id: int) -> dict:
-    old = await db.get(ApiToken, token_id)
-    if not old or old.user_id != user_id:
+    token = await db.get(ApiToken, token_id)
+    if not token or token.user_id != user_id:
         raise ValueError("Token not found")
 
-    old.status = "revoked"
-    await db.flush()
-
     raw, token_hash, token_prefix = _generate_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(days=90)
-
-    new = ApiToken(
-        user_id=user_id,
-        name=old.name,
-        token_hash=token_hash,
-        token_prefix=token_prefix,
-        expires_at=expires_at,
-    )
-    db.add(new)
+    token.token_hash = token_hash
+    token.token_prefix = token_prefix
+    token.expires_at = datetime.now(timezone.utc) + timedelta(days=90)
     await db.commit()
-    await db.refresh(new)
+    await db.refresh(token)
 
     return {
-        "id": new.id,
+        "id": token.id,
         "token": raw,
         "token_prefix": token_prefix,
-        "expires_at": new.expires_at.isoformat(),
+        "expires_at": token.expires_at.isoformat(),
     }
+
+
+async def delete_token(db: AsyncSession, token_id: int, user_id: int) -> None:
+    token = await db.get(ApiToken, token_id)
+    if not token or token.user_id != user_id:
+        raise ValueError("Token not found")
+    await db.delete(token)
+    await db.commit()
 
 
 async def verify_api_token(db: AsyncSession, raw_token: str) -> int | None:

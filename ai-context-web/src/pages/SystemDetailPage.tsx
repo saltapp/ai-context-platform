@@ -4,9 +4,11 @@ import { useAuth } from '../hooks/useAuth'
 import { getSystem, updateSystem, deleteSystem, updateGitlabCredentials } from '../api/systems'
 import type { System, App } from '../api/systems'
 import { createApp, deleteApp } from '../api/apps'
-import { triggerIndex } from '../api/index'
+import { triggerIndex, cancelIndex, getIndexStatus } from '../api/index'
 import { listSystemDocs, deleteDocument, downloadFile, uploadDocument } from '../api/documents'
 import type { Document } from '../api/documents'
+import { getSystemIndexStatus } from '../api/index'
+import type { SystemIndexStatus } from '../api/index'
 import StatusBadge from '../components/StatusBadge'
 import ConfirmDialog from '../components/ConfirmDialog'
 
@@ -61,6 +63,7 @@ export default function SystemDetailPage() {
   const [showUploadDoc, setShowUploadDoc] = useState(false)
   const [deletingApp, setDeletingApp] = useState<App | null>(null)
   const [deletingDoc, setDeletingDoc] = useState<Document | null>(null)
+  const [indexStatus, setIndexStatus] = useState<SystemIndexStatus | null>(null)
 
   // Edit system form
   const [editName, setEditName] = useState('')
@@ -96,6 +99,12 @@ export default function SystemDetailPage() {
       const sys = await getSystem(id)
       setSystem(sys)
       setApps(sys.apps ?? [])
+      try {
+        const status = await getSystemIndexStatus(id)
+        setIndexStatus(status)
+      } catch {
+        /* ignore */
+      }
     } finally {
       setLoading(false)
     }
@@ -197,8 +206,28 @@ export default function SystemDetailPage() {
 
   const handleTriggerIndex = async (app: App) => {
     try {
-      await triggerIndex(app.id)
+      const result = await triggerIndex(app.id, true, true)
+      navigate(`/apps/${app.id}/index/${result.job_id}`)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const handleCancelIndex = async (app: App) => {
+    try {
+      await cancelIndex(app.id)
       await loadSystem()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const handleViewProgress = async (app: App) => {
+    try {
+      const status = await getIndexStatus(app.id)
+      if (status.current_job_id) {
+        navigate(`/apps/${app.id}/index/${status.current_job_id}`)
+      }
     } catch {
       /* ignore */
     }
@@ -356,6 +385,32 @@ export default function SystemDetailPage() {
       {/* ===== APP List Tab ===== */}
       {activeTab === 'apps' && (
         <div>
+          {/* 全局索引状态感知栏 */}
+          {indexStatus && (indexStatus.running_count > 0 || indexStatus.pending_count > 0 || indexStatus.recent_completed) && (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-4 py-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+              <span className="text-indigo-700 font-medium">
+                当前运行: {indexStatus.running_count}/{indexStatus.max_concurrent}
+              </span>
+              {indexStatus.pending_count > 0 && (
+                <span className="text-amber-700">
+                  排队中: {indexStatus.pending_count}
+                </span>
+              )}
+              {indexStatus.recent_completed && (
+                <span className="text-gray-600">
+                  最近完成: {apps.find(a => a.id === indexStatus.recent_completed!.app_id)?.name ?? indexStatus.recent_completed.app_id}
+                  <span className={indexStatus.recent_completed.status === 'success' ? 'text-emerald-600' : 'text-red-500'}>
+                    ({indexStatus.recent_completed.status === 'success' ? '成功' : '失败'})
+                  </span>
+                </span>
+              )}
+              {indexStatus.running_count >= indexStatus.max_concurrent && (
+                <span className="text-amber-600 text-xs">
+                  当前索引队列已满，新任务将加入等待队列
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">APP列表</h2>
             {isAdminOrCreator && (
@@ -411,21 +466,71 @@ export default function SystemDetailPage() {
                     >
                       查看详情
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleTriggerIndex(app)}
-                      className="text-sm text-indigo-600 hover:text-indigo-800"
-                    >
-                      触发索引
-                    </button>
+                    {app.index_status === 'pending' || app.index_status === 'running' ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleViewProgress(app)}
+                          className="text-sm text-indigo-600 hover:text-indigo-800"
+                        >
+                          查看进度
+                        </button>
+                        {isAdminOrCreator && (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelIndex(app)}
+                            className="text-sm text-red-500 hover:text-red-700"
+                          >
+                            取消索引
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {isAdminOrCreator && (
+                          <button
+                            type="button"
+                            onClick={() => handleTriggerIndex(app)}
+                            className="text-sm text-indigo-600 hover:text-indigo-800"
+                          >
+                            触发索引
+                          </button>
+                        )}
+                        {app.index_status === 'success' && (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/apps/${app.id}`)}
+                            className="text-sm text-indigo-600 hover:text-indigo-800"
+                          >
+                            Wiki
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/apps/${app.id}`)}
+                          className="text-sm text-indigo-600 hover:text-indigo-800"
+                        >
+                          文档
+                        </button>
+                      </>
+                    )}
                     {isAdminOrCreator && (
-                      <button
-                        type="button"
-                        onClick={() => setDeletingApp(app)}
-                        className="text-sm text-red-500 hover:text-red-700 ml-auto"
-                      >
-                        删除
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/apps/${app.id}`)}
+                          className="text-sm text-indigo-600 hover:text-indigo-800"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingApp(app)}
+                          className="text-sm text-red-500 hover:text-red-700 ml-auto"
+                        >
+                          删除
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -767,11 +872,14 @@ export default function SystemDetailPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">负责人</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  负责人 <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={appOwner}
                   onChange={(e) => setAppOwner(e.target.value)}
+                  required
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -787,7 +895,7 @@ export default function SystemDetailPage() {
               <button
                 type="button"
                 onClick={handleCreateApp}
-                disabled={submitting || !appName.trim() || !appGitUrl.trim()}
+                disabled={submitting || !appName.trim() || !appGitUrl.trim() || !appOwner.trim()}
                 className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 创建
@@ -848,11 +956,11 @@ export default function SystemDetailPage() {
       {/* ===== Delete App Confirm ===== */}
       {deletingApp && (
         <ConfirmDialog
+          open={!!deletingApp}
           title="确认删除APP"
           message={`确认删除APP「${deletingApp.name}」？此操作不可恢复！`}
           confirmLabel="删除"
           danger
-          loading={submitting}
           onConfirm={() => handleDeleteApp(deletingApp)}
           onCancel={() => setDeletingApp(null)}
         />
@@ -861,11 +969,11 @@ export default function SystemDetailPage() {
       {/* ===== Delete Doc Confirm ===== */}
       {deletingDoc && (
         <ConfirmDialog
+          open={!!deletingDoc}
           title="确认删除文档"
           message={`确认删除文档「${deletingDoc.file_name}」？`}
           confirmLabel="删除"
           danger
-          loading={submitting}
           onConfirm={() => handleDeleteDoc(deletingDoc)}
           onCancel={() => setDeletingDoc(null)}
         />

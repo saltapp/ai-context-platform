@@ -77,56 +77,54 @@ async def analyze_impact(
 
 
 async def _do_impact(target: str, direction: str, depth: int, repo: str | None) -> dict:
-    resp = await bridge._client.post(
-        f"{bridge._client.base_url}/api/query",
-        json={"query": target, "limit": 5, "repo": repo},
-    )
-    resp.raise_for_status()
-    query_data = resp.json()
+    # Use gitnexus query CLI to find relevant processes
+    query_data = await bridge.query(target, repo=repo, limit=5)
 
-    cypher = (
-        f"MATCH (a)-[r]->(b) WHERE b.name CONTAINS '{target}' OR b.filePath CONTAINS '{target}' "
-        f"RETURN a.name, a.filePath, type(r), b.name, b.filePath LIMIT 50"
-    )
-    if direction == "upstream":
-        cypher = (
-            f"MATCH (a)-[r]->(b) WHERE b.name CONTAINS '{target}' "
-            f"RETURN a.name AS caller, a.filePath AS caller_file, b.name AS callee LIMIT 50"
-        )
-    elif direction == "downstream":
-        cypher = (
-            f"MATCH (a)-[r]->(b) WHERE a.name CONTAINS '{target}' "
-            f"RETURN a.name AS caller, b.name AS callee, b.filePath AS callee_file LIMIT 50"
-        )
+    # Use gitnexus impact CLI for blast radius analysis
+    impact_data = {}
+    if direction in ("upstream", "both"):
+        try:
+            up = await bridge.impact(target, direction="upstream", depth=depth, repo=repo)
+            impact_data["upstream"] = up
+        except Exception:
+            impact_data["upstream"] = {}
+    if direction in ("downstream", "both"):
+        try:
+            down = await bridge.impact(target, direction="downstream", depth=depth, repo=repo)
+            impact_data["downstream"] = down
+        except Exception:
+            impact_data["downstream"] = {}
 
-    try:
-        cypher_resp = await bridge._client.post(
-            f"{bridge._client.base_url}/api/query",
-            json={"cypher": cypher, "repo": repo},
-        )
-        cypher_resp.raise_for_status()
-        cypher_data = cypher_resp.json()
-    except Exception:
-        cypher_data = []
+    up_data = impact_data.get("upstream", {})
+    down_data = impact_data.get("downstream", {})
 
-    upstream = []
-    downstream = []
-    if isinstance(cypher_data, list):
-        for row in cypher_data:
-            if direction in ("upstream", "both"):
-                upstream.append({"depth": 1, "nodes": [row]})
-            if direction in ("downstream", "both"):
-                downstream.append({"depth": 1, "nodes": [row]})
+    up_by_depth = up_data.get("byDepth", {}) if isinstance(up_data, dict) else {}
+    down_by_depth = down_data.get("byDepth", {}) if isinstance(down_data, dict) else {}
+
+    d1_up = up_by_depth.get("1", []) if isinstance(up_by_depth, dict) else []
+    d1_down = down_by_depth.get("1", []) if isinstance(down_by_depth, dict) else []
+
+    upstream_items = [{"depth": 1, "nodes": [s] if isinstance(s, dict) else [{"name": str(s)}]} for s in d1_up]
+    downstream_items = [{"depth": 1, "nodes": [s] if isinstance(s, dict) else [{"name": str(s)}]} for s in d1_down]
+
+    risk = "LOW"
+    total = len(d1_up) + len(d1_down)
+    if total >= 10:
+        risk = "CRITICAL"
+    elif total >= 5:
+        risk = "HIGH"
+    elif total >= 2:
+        risk = "MEDIUM"
 
     return {
         "target": {"name": target, "type": "unknown", "file": ""},
-        "risk": "UNKNOWN",
+        "risk": risk,
         "summary": {
-            "direct_upstream": len(upstream),
-            "direct_downstream": len(downstream),
-            "affected_processes": len(query_data.get("processes", [])) if isinstance(query_data, dict) else 0,
+            "direct_upstream": len(d1_up),
+            "direct_downstream": len(d1_down),
+            "affected_processes": len(query_data.get("processes", [])),
         },
-        "upstream": upstream,
-        "downstream": downstream,
-        "affected_processes": query_data.get("processes", []) if isinstance(query_data, dict) else [],
+        "upstream": upstream_items,
+        "downstream": downstream_items,
+        "affected_processes": query_data.get("processes", []),
     }

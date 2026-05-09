@@ -24,15 +24,16 @@ async def startup():
     logger.info("AI Context Service starting")
     logger.info(f"REPOS_ROOT_DIR={settings.REPOS_ROOT_DIR}")
     logger.info(f"GITNEXUS_HOME={settings.GITNEXUS_HOME}")
-    logger.info(f"GITNEXUS_SERVE_URL={settings.GITNEXUS_SERVE_URL}")
 
     # Self-check: mark all running/pending index jobs as failed
     from sqlalchemy import select, update
     from app.api.deps import get_session_factory
+    from app.models.app import App
     from app.models.index_job import IndexJob
 
     session_factory = get_session_factory()
     async with session_factory() as db:
+        # Fix orphaned jobs
         stmt = (
             update(IndexJob)
             .where(IndexJob.status.in_(["running", "pending"]))
@@ -41,6 +42,15 @@ async def startup():
         result = await db.execute(stmt)
         if result.rowcount > 0:
             logger.warning(f"Marked {result.rowcount} running/pending index jobs as failed (server restart)")
+        # Fix orphaned app index_status
+        app_stmt = (
+            update(App)
+            .where(App.index_status.in_(["pending", "running"]))
+            .values(index_status="failed")
+        )
+        app_result = await db.execute(app_stmt)
+        if app_result.rowcount > 0:
+            logger.warning(f"Reset {app_result.rowcount} apps from pending/running to failed")
         await db.commit()
 
 
@@ -61,6 +71,7 @@ from app.api.documents import router as documents_router  # noqa: E402
 from app.api.tokens import router as tokens_router  # noqa: E402
 from app.api.admin import router as admin_router  # noqa: E402
 from app.api.code import router as code_router  # noqa: E402
+from app.api.skill import router as skill_router  # noqa: E402
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(systems_router, prefix="/api/v1")
@@ -73,3 +84,4 @@ app.include_router(documents_router, prefix="/api/v1")
 app.include_router(tokens_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(code_router, prefix="/api/v1")
+app.include_router(skill_router, prefix="/api/v1")

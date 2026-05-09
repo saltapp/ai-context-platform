@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -8,11 +10,12 @@ class Settings(BaseSettings):
     GITNEXUS_CLI_PATH: str = "gitnexus"
     REPOS_ROOT_DIR: str = "/mnt/nfs/repos"
     MAX_CONCURRENT_INDEX_JOBS: int = 3
-    GITNEXUS_WIKI_MODEL: str = "gpt-4o-mini"
     OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = ""
+    GITNEXUS_WIKI_MODEL: str = "gpt-4o-mini"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = "DEBUG"
 
     # Auth
     JWT_SECRET_KEY: str = "change-me-in-production"
@@ -36,7 +39,10 @@ class Settings(BaseSettings):
     CODE_READ_MAX_BYTES: int = 65536  # 64KB per file
     CODE_READ_MAX_ITEMS: int = 20     # max items per batch request
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": [".env", f".env.{os.environ.get('APP_ENV', 'development')}"],
+        "env_file_encoding": "utf-8",
+    }
 
 
 settings = Settings()
